@@ -81,6 +81,11 @@ type Coordinates = {
   y: number;
 };
 
+type SeededRNG = {
+  next: (min?: number, max?: number, floating?: boolean) => number;
+  random: () => number;
+};
+
 export type PipeType = {
   position: Coordinates;
   initial: Coordinates;
@@ -147,7 +152,7 @@ const GameContext = React.createContext<GameContext | null>(null);
 export const GameProvider = ({ children }: { children: React.ReactNode }) => {
   const [state, setState] = useImmer<GameState>({ ...defaultState, gameSeed: null });
   const gameStateHook = useGameState();
-  const seededRNGRef = useRef<ReturnType<typeof createSeededRNG> | null>(null);
+  const seededRNGRef = useRef<SeededRNG | null>(null);
 
   // Main Functions
   const startGame = (window: Size) => {
