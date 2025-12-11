@@ -291,7 +291,7 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
 
           setBirdCenter(draft);
           // Initialize seeded RNG with new seed
-          seededRNGRef.current = createSeededRNG(seed);
+          seededRNGRef.current = createSeededRNG(seed) as SeededRNG;
           createPipes(draft);
           return draft;
         });
