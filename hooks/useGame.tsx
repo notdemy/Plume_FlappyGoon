@@ -180,9 +180,10 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
     let odd: boolean;
     let randomNumber: number;
 
-    if (draft.gameSeed && seededRNGRef.current) {
-      odd = seededRNGRef.current.next(0, 1) === 1;
-      randomNumber = seededRNGRef.current.next(odd ? 0.5 : 0, odd ? 1 : 0, true);
+    const rng = seededRNGRef.current;
+    if (draft.gameSeed && rng) {
+      odd = rng.next(0, 1) === 1;
+      randomNumber = rng.next(odd ? 0.5 : 0, odd ? 1 : 0, true);
     } else {
       odd = _.random(0, 1) === 1;
       randomNumber = _.random(odd ? 0.5 : 0, odd ? 1 : 0, true);
