@@ -7,6 +7,11 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import connectDB from '../../../lib/mongodb';
 import Leaderboard from '../../../models/Leaderboard';
 
+interface LeaderboardLeanResult {
+  highestScore: number;
+  _id?: unknown;
+}
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
@@ -28,7 +33,7 @@ export default async function handler(
     // Find leaderboard entry by username
     const leaderboardEntry = await Leaderboard.findOne({ username: username.trim() })
       .select('highestScore')
-      .lean();
+      .lean() as LeaderboardLeanResult | null;
 
     if (!leaderboardEntry) {
       // User doesn't have a score yet
