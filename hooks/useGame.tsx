@@ -1,11 +1,13 @@
 import _ from "lodash";
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import useMediaQuery from "./useMediaQuery";
 import { useImmer } from "use-immer";
 import { TargetAndTransition } from "framer-motion";
 import useElementSize from "./useElementSize";
 import { WritableDraft } from "immer/dist/internal";
 import { v4 } from "uuid";
+import { createSeededRNG } from "../lib/seedRandom";
+import useGameState from "./useGameState";
 
 const HEIGHT = 64;
 const WIDTH = 92;
@@ -138,18 +140,23 @@ interface GameState {
     step: number;
     distance: number;
   };
+  gameSeed: string | null;
 }
 type StateDraft = WritableDraft<GameState>;
 const GameContext = React.createContext<GameContext | null>(null);
 export const GameProvider = ({ children }: { children: React.ReactNode }) => {
-  const [state, setState] = useImmer<GameState>(defaultState);
+  const [state, setState] = useImmer<GameState>({ ...defaultState, gameSeed: null });
+  const gameStateHook = useGameState();
+  const seededRNGRef = useRef<ReturnType<typeof createSeededRNG> | null>(null);
+
   // Main Functions
   const startGame = (window: Size) => {
     setState((draft) => {
       draft.window = window;
       draft.isReady = true;
       setBirdCenter(draft);
-      createPipes(draft);
+      // Don't create pipes here - they will be created when game actually starts
+      // This prevents pipes from being created without a seed
       return draft;
     });
   };
@@ -164,8 +171,18 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
   };
   // Pipe Functions
   const generatePipeExtension = (index: number, draft: StateDraft) => {
-    const odd = _.random(0, 1) === 1;
-    const randomNumber = _.random(odd ? 0.5 : 0, odd ? 1 : 0, true);
+    // Use seeded RNG if available, otherwise fall back to lodash.random
+    let odd: boolean;
+    let randomNumber: number;
+
+    if (draft.gameSeed && seededRNGRef.current) {
+      odd = seededRNGRef.current.next(0, 1) === 1;
+      randomNumber = seededRNGRef.current.next(odd ? 0.5 : 0, odd ? 1 : 0, true);
+    } else {
+      odd = _.random(0, 1) === 1;
+      randomNumber = _.random(odd ? 0.5 : 0, odd ? 1 : 0, true);
+    }
+
     const extension = randomNumber * draft.pipe.extension;
     return {
       height: draft.pipe.height + extension,
@@ -223,23 +240,74 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
       return draft;
     });
   };
+
+  // Reset game state when starting new game
+  const resetGame = () => {
+    gameStateHook.resetGameState();
+    seededRNGRef.current = null;
+    setState((draft) => {
+      draft.isStarted = false;
+      draft.gameSeed = null;
+      draft.bird.isFlying = false;
+      setBirdCenter(draft);
+      createPipes(draft);
+      return draft;
+    });
+  };
   // Window Functions
-  const handleWindowClick = () => {
+  const handleWindowClick = async () => {
     if (state.isStarted) {
       fly();
+      // Record jump timestamp
+      gameStateHook.recordJump();
     } else {
-      setState((draft) => {
-        draft.isStarted = true;
-        draft.rounds.push({
-          score: 0,
-          datetime: new Date().toISOString(),
-          key: v4(),
+      // Reset previous game state if any
+      gameStateHook.resetGameState();
+      seededRNGRef.current = null;
+
+      // Start new game session
+      try {
+        const { token, seed } = await gameStateHook.startGame();
+
+        setState((draft) => {
+          // Reset game state
+          draft.isStarted = true;
+          draft.gameSeed = seed;
+          draft.bird.isFlying = true;
+          draft.pipe.distance = defaultState.pipe.distance; // Reset pipe speed
+
+          // Clear previous rounds and start new one
+          draft.rounds = [{
+            score: 0,
+            datetime: new Date().toISOString(),
+            key: v4(),
+          }];
+
+          setBirdCenter(draft);
+          // Initialize seeded RNG with new seed
+          seededRNGRef.current = createSeededRNG(seed);
+          createPipes(draft);
+          return draft;
         });
-        draft.bird.isFlying = true;
-        setBirdCenter(draft);
-        createPipes(draft);
-        return draft;
-      });
+      } catch (error) {
+        console.error('Failed to start game session:', error);
+        // Still allow game to start locally even if API fails
+        setState((draft) => {
+          draft.isStarted = true;
+          draft.gameSeed = null; // No seed if API fails
+          draft.bird.isFlying = true;
+          draft.pipe.distance = defaultState.pipe.distance;
+          draft.rounds = [{
+            score: 0,
+            datetime: new Date().toISOString(),
+            key: v4(),
+          }];
+          setBirdCenter(draft);
+          seededRNGRef.current = null;
+          createPipes(draft);
+          return draft;
+        });
+      }
     }
   };
   // Bird Functions
@@ -264,11 +332,11 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
     const impactablePipes = draft.pipes.filter((pipe) => {
       return (
         pipe.top.position.x <
-          draft.bird.position.x -
-            draft.pipe.tolerance +
-            draft.bird.size.width &&
+        draft.bird.position.x -
+        draft.pipe.tolerance +
+        draft.bird.size.width &&
         pipe.top.position.x + pipe.top.size.width >
-          draft.bird.position.x + draft.pipe.tolerance
+        draft.bird.position.x + draft.pipe.tolerance
       );
     });
     const pipeImpact = impactablePipes.some((pipe) => {
@@ -283,6 +351,20 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
       draft.bird.isFlying = false;
       draft.isStarted = false;
       draft.bird.animate.rotate = [0, 540];
+
+      // Submit score on game over
+      const currentRound = _.last(draft.rounds);
+      if (currentRound && draft.gameSeed) {
+        const score = currentRound.score;
+        // Submit asynchronously without blocking UI
+        gameStateHook.submitScore(score).then((result) => {
+          if (result.success) {
+            console.log('Score submitted successfully', result);
+          } else {
+            console.warn('Score submission failed:', result.error);
+          }
+        });
+      }
     } else {
       draft.bird.animate.rotate = [0, 0];
     }

@@ -38,9 +38,8 @@ export default function FlappyBird() {
   useInterval(() => fall(), isStarted ? delay : null);
   return (
     <motion.div
-      className={`m-auto absolute z-40 ${
-        !isStarted && "animate-pulse"
-      } w-20 h-10`}
+      className={`m-auto absolute z-40 ${!isStarted && "animate-pulse"
+        } w-20 h-10`}
       style={{
         ...position,
       }}
